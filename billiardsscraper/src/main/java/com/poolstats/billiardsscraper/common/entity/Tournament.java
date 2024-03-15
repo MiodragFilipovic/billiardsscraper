@@ -1,5 +1,6 @@
 package com.poolstats.billiardsscraper.common.entity;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import javax.persistence.Column;
@@ -7,6 +8,8 @@ import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.GenerationType;
 import javax.persistence.Id;
+import javax.persistence.JoinColumn;
+import javax.persistence.ManyToOne;
 import javax.persistence.OneToMany;
 import javax.persistence.Table;
 
@@ -16,12 +19,12 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "club")
+@Table(name = "tournament")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class Club {
+public class Tournament {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
@@ -30,22 +33,16 @@ public class Club {
 
 	private String externalLink;
 
+	private LocalDate date;
+
 	@Column(nullable = false)
 	private String name;
 
-	private String clubInfo;
+	@ManyToOne
+	@JoinColumn(name = "club_id")
+	private Club club;
 
-	private String countryFlagURL;
+	@OneToMany(mappedBy = "tournament")
+	private List<Match> matches;
 
-	private Integer plaуersCount;
-
-	private Integer tournamentsCount;
-
-	private String imageURL;
-
-	@OneToMany(mappedBy = "club")
-	private List<Player> players;
-
-	@OneToMany(mappedBy = "club")
-	private List<Tournament> tournaments;
 }

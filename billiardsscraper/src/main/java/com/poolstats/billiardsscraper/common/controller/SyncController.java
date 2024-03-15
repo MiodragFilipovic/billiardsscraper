@@ -32,7 +32,29 @@ public class SyncController {
 			return "Clubs updated successfully";
 		} catch (Exception e) {
 			e.printStackTrace();
-			return "Clubs to update players";
+			return "Failed to update clubs";
+		}
+	}
+
+	@GetMapping("/allTournaments")
+	public String syncAllTournaments() {
+		try {
+			scraperService.syncAllTournamentsFromWebsite();
+			return "Tournaments updated successfully";
+		} catch (Exception e) {
+			e.printStackTrace();
+			return "Failed to update tournaments";
+		}
+	}
+
+	@GetMapping("/allMatches")
+	public String syncAllMatches() {
+		try {
+			scraperService.syncAllMatchesFromWebsite();
+			return "Tournaments updated successfully";
+		} catch (Exception e) {
+			e.printStackTrace();
+			return "Failed to update tournaments";
 		}
 	}
 }
