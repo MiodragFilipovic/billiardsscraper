@@ -18,6 +18,7 @@ import org.htmlunit.html.HtmlImage;
 import org.htmlunit.html.HtmlPage;
 import org.htmlunit.html.HtmlParagraph;
 import org.htmlunit.html.HtmlSpan;
+import org.htmlunit.html.HtmlTable;
 import org.htmlunit.html.HtmlTableRow;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -32,9 +33,11 @@ import org.springframework.web.client.RestTemplate;
 import com.poolstats.billiardsscraper.common.entity.Club;
 import com.poolstats.billiardsscraper.common.entity.Match;
 import com.poolstats.billiardsscraper.common.entity.Player;
+import com.poolstats.billiardsscraper.common.entity.Team;
 import com.poolstats.billiardsscraper.common.entity.Tournament;
 import com.poolstats.billiardsscraper.common.repo.ClubRepo;
 import com.poolstats.billiardsscraper.common.repo.PlayerRepo;
+import com.poolstats.billiardsscraper.common.repo.TeamRepo;
 import com.poolstats.billiardsscraper.common.repo.TournamentRepo;
 import com.poolstats.billiardsscraper.common.service.ClubService;
 import com.poolstats.billiardsscraper.common.service.MatchService;
@@ -64,10 +67,13 @@ public class ScraperServiceImpl implements ScraperService {
 	@Autowired
 	private TournamentRepo tournamentRepo;
 	@Autowired
+	private TeamRepo teamRepo;
+	@Autowired
 	private RestTemplate restTemplate;
 
 	@Override
 	public void syncPlayersFromWebsite() {
+		long startTime = System.currentTimeMillis();
 		try {
 			WebClient webClient = new WebClient(BrowserVersion.CHROME);
 			webClient.getOptions().setJavaScriptEnabled(true); // enable javascript
@@ -93,7 +99,10 @@ public class ScraperServiceImpl implements ScraperService {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
-
+		long endTime = System.currentTimeMillis();
+		long executionTime = endTime - startTime;
+		double executionTimeInMinutes = executionTime / 60000.0;
+		System.out.println("syncPlayersFromWebsite: " + executionTimeInMinutes + " min .");
 	}
 
 	@Override
@@ -111,10 +120,13 @@ public class ScraperServiceImpl implements ScraperService {
 
 			StringBuilder tournamentsWinSB = new StringBuilder();
 			StringBuilder firstNameSB = new StringBuilder();
+
 			try {
 
-				for (int i = firstNameAndWins.length() - 1; i >= 0; i--) {
-					char c = firstNameAndWins.charAt(i);
+				String modifiedString = firstNameAndWins.replace("\n", " ");
+
+				for (int i = modifiedString.length() - 1; i >= 0; i--) {
+					char c = modifiedString.charAt(i);
 					if (Character.isDigit(c)) {
 						tournamentsWinSB.insert(0, c);
 					} else {
@@ -122,7 +134,7 @@ public class ScraperServiceImpl implements ScraperService {
 					}
 				}
 				tournamentWins = tournamentsWinSB.toString();
-				firstName = firstNameSB.toString();
+				firstName = firstNameSB.toString().trim();
 			} catch (IndexOutOfBoundsException e) {
 				System.out.println(lastName);
 				e.printStackTrace();
@@ -161,7 +173,7 @@ public class ScraperServiceImpl implements ScraperService {
 				winLossRatio = winLossRatioElements.get(0).getTextContent();
 			}
 
-			String fullName = firstName + " " + lastName;
+			String fullName = lastName + " " + firstName;
 
 			// Pretraga igrača u bazi po imenu i prezimenu
 			Optional<Player> existingPlayerOptional = playerRepo.findByFullName(fullName);
@@ -208,6 +220,7 @@ public class ScraperServiceImpl implements ScraperService {
 
 	@Override
 	public void syncClubsFromWebsite() {
+		long startTime = System.currentTimeMillis();
 		try {
 			WebClient webClient = new WebClient(BrowserVersion.CHROME);
 			webClient.getOptions().setJavaScriptEnabled(true); // enable javascript
@@ -229,6 +242,10 @@ public class ScraperServiceImpl implements ScraperService {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
+		long endTime = System.currentTimeMillis();
+		long executionTime = endTime - startTime;
+		double executionTimeInMinutes = executionTime / 60000.0;
+		System.out.println("syncClubsFromWebsite: " + executionTimeInMinutes + " min .");
 	}
 
 	private void createIndependentClub() {
@@ -351,6 +368,7 @@ public class ScraperServiceImpl implements ScraperService {
 
 	@Override
 	public void syncAllTournamentsFromWebsite() {
+		long startTime = System.currentTimeMillis();
 		List<Club> clubs = clubRepo.findAll();
 
 		for (Club club : clubs) {
@@ -384,13 +402,17 @@ public class ScraperServiceImpl implements ScraperService {
 				}
 			}
 		}
+		long endTime = System.currentTimeMillis();
+		long executionTime = endTime - startTime;
+		double executionTimeInMinutes = executionTime / 60000.0;
+		System.out.println("syncAllTournamentsFromWebsite: " + executionTimeInMinutes + " min .");
 	}
 
 	@Override
 	public void saveMatchWithData(HtmlTableRow matchElement, int orderNumber, Tournament tournament) {
 		Match newMatch = new Match();
 
-		if (!matchElement.getCells().get(4).getTextContent().trim().equals(">>")) {
+		if (matchElement.getCells().get(4).getTextContent().trim().equals(">>")) {
 			return;
 		}
 
@@ -400,18 +422,42 @@ public class ScraperServiceImpl implements ScraperService {
 			newMatch.setOrderNumber(Integer.parseInt(matchElement.getCells().get(0).getTextContent().trim()));
 			newMatch.setDate(getMatchDateTimeFromCell(matchElement.getCells().get(1).getTextContent().trim(), tournament.getDate().getYear()));
 
-			Player player1 = getPlayerByName(matchElement.getCells().get(3).getTextContent().trim());
-			Player player2 = getPlayerByName(matchElement.getCells().get(7).getTextContent().trim());
-			newMatch.setPlayer1(player1);
-			newMatch.setPlayer2(player2);
-			newMatch.setResult1(Integer.parseInt((matchElement.getCells().get(4).getTextContent().trim())));
-			newMatch.setResult2(Integer.parseInt((matchElement.getCells().get(5).getTextContent().trim())));
-			newMatch.setHandikap((matchElement.getCells().get(6).getTextContent().trim()));
-			if (newMatch.getResult1() > newMatch.getResult2()) {
-				newMatch.setWinner(player1);
+			Player player1;
+			Player player2;
+			Team team1;
+			Team team2;
+			if (tournament.getSingle()) {
+				player1 = getPlayerByName(matchElement.getCells().get(3).getTextContent().trim());
+				player2 = getPlayerByName(matchElement.getCells().get(7).getTextContent().trim());
+				newMatch.setPlayer1(player1);
+				newMatch.setPlayer2(player2);
 			} else {
-				newMatch.setWinner(player2);
+				team1 = getTeamByName(matchElement.getCells().get(3).getTextContent().trim());
+				team2 = getTeamByName(matchElement.getCells().get(7).getTextContent().trim());
+
+				String teamname1 = matchElement.getCells().get(7).getVisibleText();
+				String teamname2 = matchElement.getCells().get(7).getTextContent();
 			}
+
+			try {
+				newMatch.setResult1(Integer.parseInt((matchElement.getCells().get(4).getTextContent().trim())));
+			} catch (NumberFormatException e) {
+				newMatch.setResult1(-1);
+			}
+
+			try {
+				newMatch.setResult2(Integer.parseInt((matchElement.getCells().get(5).getTextContent().trim())));
+			} catch (NumberFormatException e) {
+				newMatch.setResult2(-1);
+			}
+
+			newMatch.setHandikap((matchElement.getCells().get(6).getTextContent().trim()));
+
+//			if (newMatch.getResult1() > newMatch.getResult2()) {
+//				newMatch.setWinner(player1);
+//			} else {
+//				newMatch.setWinner(player2);
+//			}
 
 		} catch (NumberFormatException e) {
 			e.printStackTrace();
@@ -424,11 +470,30 @@ public class ScraperServiceImpl implements ScraperService {
 
 	}
 
+	private Team getTeamByName(String playerNames) {
+		Team team = new Team();
+		team.setPlayer1(getFirstPlayerFromTeamName(playerNames));
+		team.setPlayer2(getSecondPlayerFromTeamName(playerNames));
+		return teamRepo.save(team);
+	}
+
+	private Player getSecondPlayerFromTeamName(String playerNames) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	private Player getFirstPlayerFromTeamName(String playerNames) {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
 	private Player getPlayerByName(String fullName) {
-		Optional<Player> playerOptional = playerRepo.findByFullName(fullName);
+		Optional<Player> playerOptional = playerRepo.findByFullName(fullName.trim());
 		if (playerOptional.isPresent()) {
 			return playerOptional.get();
 		}
+
+		System.out.println("Nije pronadjen igrac: " + fullName);
 		return null;
 	}
 
@@ -454,45 +519,53 @@ public class ScraperServiceImpl implements ScraperService {
 
 		return dateTime;
 	}
+
 	@Override
 	public void syncAllMatchesFromWebsite() {
+		long startTime = System.currentTimeMillis();
+
 		try {
 			WebClient webClient = new WebClient(BrowserVersion.CHROME);
 			webClient.getOptions().setJavaScriptEnabled(true); // enable javascript
 			webClient.getOptions().setThrowExceptionOnScriptError(false); // even if there is error in js continue
-//					webClient.waitForBackgroundJavaScript(500); // important! wait until javascript finishes rendering
 
 			List<Tournament> tournaments = tournamentRepo.findAll();
 
-//			for (Tournament tournament : tournaments) {
-//				HtmlPage page = webClient.getPage("https://bilijar.club/tournament.php?ID=" + tournament.getExternalId());
-//
-//				List<HtmlTableRow> matches = page.getByXPath("//tr[contains(@class, 'size-11')]");
-//				System.out.println(tournament.getName());
-//				int orderNumberMatch = 0;
-//				for (HtmlTableRow matchElement : matches) {
-//					orderNumberMatch++;
-//					saveMatchWithData(matchElement, orderNumberMatch, tournament);
-//				}
-//
-//			}
+			for (Tournament tournament : tournaments) {
+				HtmlPage page = webClient.getPage("https://bilijar.club/tournament.php?ID=" + tournament.getExternalId());
 
-			Tournament tournament = tournamentRepo.findByExternalId("2657").get();
+				updateTournamentData(tournament, page);
 
-			HtmlPage page = webClient.getPage("https://bilijar.club/tournament.php?ID=" + tournament.getExternalId());
+				List<HtmlTableRow> matches = page.getByXPath("//tr[contains(@class, 'size-11')]");
+				System.out.println(tournament.getName());
+				int orderNumberMatch = 0;
+				for (HtmlTableRow matchElement : matches) {
+					orderNumberMatch++;
+					saveMatchWithData(matchElement, orderNumberMatch, tournament);
+				}
 
-			List<HtmlTableRow> matches = page.getByXPath("//tr[contains(@class, 'size-11')]");
-			System.out.println(tournament.getName());
-			int orderNumberMatch = 0;
-			for (HtmlTableRow matchElement : matches) {
-				orderNumberMatch++;
-				saveMatchWithData(matchElement, orderNumberMatch, tournament);
 			}
 
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
+		long endTime = System.currentTimeMillis();
+		long executionTime = endTime - startTime;
+		double executionTimeInMinutes = executionTime / 60000.0;
+		System.out.println("syncAllMatchesFromWebsite: " + executionTimeInMinutes + " min .");
+	}
+
+	private void updateTournamentData(Tournament tournament, HtmlPage page) {
+		HtmlTable tournamentTable = (HtmlTable) page.getElementById("turnir");
+
+		// Extract tournament details
+		String schema = tournamentTable.getCellAt(1, 1).getTextContent().trim();
+		String type = tournamentTable.getCellAt(1, 4).getTextContent().trim();
+		// Update tournament attributes
+		tournament.setSchema(schema);
+		tournament.setSingle(!type.equals("Parovi"));
+
 	}
 
 }
