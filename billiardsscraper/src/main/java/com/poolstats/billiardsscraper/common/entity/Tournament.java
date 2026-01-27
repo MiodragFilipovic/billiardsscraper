@@ -35,6 +35,10 @@ public class Tournament {
 
 	private LocalDate date;
 
+	private Boolean single;
+
+	private String schema;
+
 	@Column(nullable = false)
 	private String name;
 
