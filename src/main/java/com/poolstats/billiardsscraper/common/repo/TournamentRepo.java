@@ -9,4 +9,7 @@ import com.poolstats.billiardsscraper.common.entity.Tournament;
 public interface TournamentRepo extends JpaRepository<Tournament, Long> {
 
 	Optional<Tournament> findByExternalId(String externalId);
+
+	Tournament findTopByOrderByDateDesc();
 }
+

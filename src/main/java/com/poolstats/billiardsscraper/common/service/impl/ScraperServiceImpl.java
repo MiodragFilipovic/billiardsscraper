@@ -1,29 +1,19 @@
 package com.poolstats.billiardsscraper.common.service.impl;
 
 import java.io.IOException;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Locale;
-import java.util.Optional;
 
 import org.htmlunit.BrowserVersion;
 import org.htmlunit.WebClient;
-import org.htmlunit.html.HtmlAnchor;
-import org.htmlunit.html.HtmlBold;
 import org.htmlunit.html.HtmlDivision;
-import org.htmlunit.html.HtmlHeading4;
-import org.htmlunit.html.HtmlImage;
 import org.htmlunit.html.HtmlPage;
-import org.htmlunit.html.HtmlParagraph;
-import org.htmlunit.html.HtmlSpan;
-import org.htmlunit.html.HtmlTable;
 import org.htmlunit.html.HtmlTableRow;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
@@ -31,22 +21,24 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
 import com.poolstats.billiardsscraper.common.entity.Club;
-import com.poolstats.billiardsscraper.common.entity.Match;
-import com.poolstats.billiardsscraper.common.entity.Player;
-import com.poolstats.billiardsscraper.common.entity.Team;
 import com.poolstats.billiardsscraper.common.entity.Tournament;
 import com.poolstats.billiardsscraper.common.repo.ClubRepo;
-import com.poolstats.billiardsscraper.common.repo.PlayerRepo;
-import com.poolstats.billiardsscraper.common.repo.TeamRepo;
 import com.poolstats.billiardsscraper.common.repo.TournamentRepo;
 import com.poolstats.billiardsscraper.common.service.ClubService;
 import com.poolstats.billiardsscraper.common.service.MatchService;
 import com.poolstats.billiardsscraper.common.service.PlayerService;
+import com.poolstats.billiardsscraper.common.service.PlayerTournamentStatsService;
 import com.poolstats.billiardsscraper.common.service.ScraperService;
 import com.poolstats.billiardsscraper.common.service.TournamentService;
 
+/**
+ * Service implementation for orchestrating web scraping operations.
+ * Delegates domain-specific logic to appropriate services.
+ */
 @Service
 public class ScraperServiceImpl implements ScraperService {
+
+	private static final Logger log = LoggerFactory.getLogger(ScraperServiceImpl.class);
 
 	public static final String[] TOURNAMENT_YEARS = { "2026","2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016" };
 
@@ -54,329 +46,153 @@ public class ScraperServiceImpl implements ScraperService {
 
 	@Autowired
 	private PlayerService playerService;
-	@Autowired
-	private PlayerRepo playerRepo;
+
 	@Autowired
 	private ClubService clubService;
+
 	@Autowired
 	private ClubRepo clubRepo;
+
 	@Autowired
 	private TournamentService tournamentService;
+
 	@Autowired
 	private MatchService matchService;
+
+	@Autowired
+	private PlayerTournamentStatsService playerTournamentStatsService;
+
 	@Autowired
 	private TournamentRepo tournamentRepo;
-	@Autowired
-	private TeamRepo teamRepo;
+
 	@Autowired
 	private RestTemplate restTemplate;
 
+	/**
+	 * Synchronizes all players from the website for all clubs.
+	 * Scrapes player data and delegates to PlayerService for processing.
+	 */
 	@Override
 	public void syncPlayersFromWebsite() {
+		log.info("=== Starting player synchronization ===");
 		long startTime = System.currentTimeMillis();
+		int totalPlayersProcessed = 0;
+
 		try {
 			WebClient webClient = new WebClient(BrowserVersion.CHROME);
-			webClient.getOptions().setJavaScriptEnabled(true); // enable javascript
-			webClient.getOptions().setThrowExceptionOnScriptError(false); // even if there is error in js continue
-//			webClient.waitForBackgroundJavaScript(500); // important! wait until javascript finishes rendering
+			webClient.getOptions().setJavaScriptEnabled(true);
+			webClient.getOptions().setThrowExceptionOnScriptError(false);
 
 			List<Club> clubs = clubRepo.findAll();
+			log.info("Found {} clubs to process", clubs.size());
 
 			for (Club club : clubs) {
-				HtmlPage page = webClient.getPage("https://bilijar.club/poklubovima.php?Club_ID=" + club.getExternalId());
+				log.info("Processing club: {} (ID: {})", club.getName(), club.getExternalId());
 
+				HtmlPage page = webClient.getPage("https://bilijar.club/poklubovima.php?Club_ID=" + club.getExternalId());
 				List<HtmlDivision> players = page.getByXPath("//div[contains(@class, 'col-sm-6 col-md-3 col-xs-6')]");
+
+				log.info("  Found {} players for club: {}", players.size(), club.getName());
 
 				int orderNumber = 0;
 				for (HtmlDivision playerElement : players) {
 					orderNumber++;
-					savePlayerWithData(playerElement, orderNumber, club);
-				}
+					playerService.savePlayerWithData(playerElement, orderNumber, club);
+					totalPlayersProcessed++;
 
+					if (orderNumber % 10 == 0) {
+						log.debug("  Processed {}/{} players for club: {}", orderNumber, players.size(), club.getName());
+					}
+				}
+				log.info("  Completed club: {} - processed {} players", club.getName(), players.size());
 			}
 
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
+			log.error("Error during player synchronization", e);
 			e.printStackTrace();
 		}
+
 		long endTime = System.currentTimeMillis();
 		long executionTime = endTime - startTime;
-		double executionTimeInMinutes = executionTime / 60000.0;
-		System.out.println("syncPlayersFromWebsite: " + executionTimeInMinutes + " min .");
+		double executionTimeInSeconds = executionTime / 1000.0;
+		log.info("=== Player synchronization completed ===");
+		log.info("Total players processed: {}", totalPlayersProcessed);
+		log.info("Execution time: {} seconds ({} minutes)",
+			String.format("%.2f", executionTimeInSeconds),
+			String.format("%.2f", executionTimeInSeconds / 60.0));
 	}
 
-	@Override
-	public void savePlayerWithData(HtmlDivision playerElement, int orderNumber, Club club) {
-		HtmlHeading4 fullNameAndWinsElement = playerElement.getFirstByXPath(".//h4[contains(@class, 'nomargin')]");
-		if (fullNameAndWinsElement != null) {
-
-			String fullNameAndWins = fullNameAndWinsElement.asNormalizedText().trim();
-
-			String[] parts = fullNameAndWins.split("\\s+", 2); // Split po prvom razmaku, maksimalno 2 dela
-			String lastName = parts[0].trim();
-			String firstNameAndWins = parts.length > 1 ? parts[1].trim() : ""; // Ostatak kao prvi deo
-			String tournamentWins = "0";
-			String firstName = "";
-
-			StringBuilder tournamentsWinSB = new StringBuilder();
-			StringBuilder firstNameSB = new StringBuilder();
-
-			try {
-
-				String modifiedString = firstNameAndWins.replace("\n", " ");
-
-				for (int i = modifiedString.length() - 1; i >= 0; i--) {
-					char c = modifiedString.charAt(i);
-					if (Character.isDigit(c)) {
-						tournamentsWinSB.insert(0, c);
-					} else {
-						firstNameSB.insert(0, c);
-					}
-				}
-				tournamentWins = tournamentsWinSB.toString();
-				firstName = firstNameSB.toString().trim();
-			} catch (IndexOutOfBoundsException e) {
-				System.out.println(lastName);
-				e.printStackTrace();
-			}
-
-			// Ekstrakcija ostalih podataka
-			String imageUrl = "";
-			String playerUrl = "";
-			String countryImageUrl = "";
-			String rating = "";
-			String winLossRatio = "";
-
-			List<HtmlImage> imgElements = playerElement.getByXPath(".//img");
-			if (!imgElements.isEmpty()) {
-				imageUrl = imgElements.get(0).getAttribute("src");
-			}
-
-			List<HtmlAnchor> aElements = playerElement.getByXPath(".//a");
-			if (!aElements.isEmpty()) {
-				playerUrl = "https://bilijar.club/" + aElements.get(0).getAttribute("href");
-			}
-
-			List<HtmlParagraph> statsElements = playerElement.getByXPath(".//p[contains(@class, 'nomargin')]");
-			List<HtmlImage> countryImgElements = statsElements.get(0).getByXPath(".//img");
-			if (!countryImgElements.isEmpty()) {
-				countryImageUrl = countryImgElements.get(0).getAttribute("src");
-			}
-
-			List<HtmlSpan> ratingElements = statsElements.get(0).getByXPath(".//span[@class='rejting']");
-			if (!ratingElements.isEmpty()) {
-				rating = ratingElements.get(0).getTextContent();
-			}
-
-			List<HtmlBold> winLossRatioElements = statsElements.get(0).getByXPath(".//b");
-			if (!winLossRatioElements.isEmpty()) {
-				winLossRatio = winLossRatioElements.get(0).getTextContent();
-			}
-
-			String fullName = lastName + " " + firstName;
-
-			// Pretraga igrača u bazi po imenu i prezimenu
-			Optional<Player> existingPlayerOptional = playerRepo.findByFullName(fullName);
-
-			String[] playerURLParts = playerUrl.split("ID=");
-			String externalId = playerURLParts.length > 1 ? playerURLParts[1] : "";
-
-			// Ako igrač postoji, ažurirajte ga
-			if (existingPlayerOptional.isPresent()) {
-				Player existingPlayer = existingPlayerOptional.get();
-
-				existingPlayer.setFirstName(firstName);
-				existingPlayer.setLastName(lastName);
-				existingPlayer.setTournamentsWins(!tournamentWins.isEmpty() ? Integer.parseInt(tournamentWins) : 0);
-				existingPlayer.setImageURL(imageUrl);
-				existingPlayer.setPlayerUrl(playerUrl);
-				existingPlayer.setExternalId(externalId);
-				existingPlayer.setFullName(fullName);
-				existingPlayer.setCountry(countryImageUrl);
-				existingPlayer.setRating(!rating.isEmpty() ? Double.parseDouble(rating) : 0);
-				existingPlayer.setClub(club);
-
-				// Ažuriranje igrača u bazi podataka
-				playerService.savePlayer(existingPlayer);
-			} else {
-				// Ako igrač ne postoji, kreirajte novog
-				Player newPlayer = new Player();
-				newPlayer.setFirstName(firstName);
-				newPlayer.setLastName(lastName);
-				newPlayer.setExternalId(externalId);
-				newPlayer.setFullName(fullName);
-				newPlayer.setTournamentsWins(!tournamentWins.isEmpty() ? Integer.parseInt(tournamentWins) : 0);
-				newPlayer.setImageURL(imageUrl);
-				newPlayer.setPlayerUrl(playerUrl);
-				newPlayer.setCountry(countryImageUrl);
-				newPlayer.setRating(!rating.isEmpty() ? Double.parseDouble(rating) : 0);
-				newPlayer.setClub(club);
-
-				// Snimanje novog igrača u bazi podataka
-				playerService.savePlayer(newPlayer);
-			}
-		}
-	}
-
+	/**
+	 * Synchronizes all clubs from the website.
+	 * Scrapes club data and delegates to ClubService for processing.
+	 */
 	@Override
 	public void syncClubsFromWebsite() {
+		log.info("=== Starting club synchronization ===");
 		long startTime = System.currentTimeMillis();
+
 		try {
 			WebClient webClient = new WebClient(BrowserVersion.CHROME);
-			webClient.getOptions().setJavaScriptEnabled(true); // enable javascript
-			webClient.getOptions().setThrowExceptionOnScriptError(false); // even if there is error in js continue
-//			webClient.waitForBackgroundJavaScript(500); // important! wait until javascript finishes rendering
-			HtmlPage page = webClient.getPage("https://bilijar.club/klubovi.php");
+			webClient.getOptions().setJavaScriptEnabled(true);
+			webClient.getOptions().setThrowExceptionOnScriptError(false);
 
+			log.info("Fetching clubs from website...");
+			HtmlPage page = webClient.getPage("https://bilijar.club/klubovi.php");
 			List<HtmlDivision> clubs = page.getByXPath("//div[contains(@class, 'col-sm-6 col-md-3')]");
+
+			log.info("Found {} clubs to process", clubs.size());
 
 			int orderNumber = 0;
 			for (HtmlDivision clubElement : clubs) {
 				orderNumber++;
-				saveClubWithData(clubElement, orderNumber);
+				clubService.saveClubWithData(clubElement, orderNumber);
+
+				if (orderNumber % 5 == 0) {
+					log.debug("Processed {}/{} clubs", orderNumber, clubs.size());
+				}
 			}
 
-			createIndependentClub();
+			log.info("Creating independent club for players without clubs...");
+			clubService.createIndependentClub();
 
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
+			log.error("Error during club synchronization", e);
 			e.printStackTrace();
 		}
+
 		long endTime = System.currentTimeMillis();
 		long executionTime = endTime - startTime;
-		double executionTimeInMinutes = executionTime / 60000.0;
-		System.out.println("syncClubsFromWebsite: " + executionTimeInMinutes + " min .");
+		double executionTimeInSeconds = executionTime / 1000.0;
+		log.info("=== Club synchronization completed ===");
+		log.info("Execution time: {} seconds ({} minutes)",
+			String.format("%.2f", executionTimeInSeconds),
+			String.format("%.2f", executionTimeInSeconds / 60.0));
 	}
 
-	private void createIndependentClub() {
-		Optional<Club> existingIndependentClub = clubRepo.findByExternalId("0");
-
-		if (existingIndependentClub.isPresent()) {
-			Club independentClub = existingIndependentClub.get();
-			independentClub.setExternalId("0");
-			independentClub.setName("Samostalni igrači");
-			clubService.saveClub(independentClub);
-		} else {
-			Club independentClub = new Club();
-			independentClub.setExternalId("0");
-			independentClub.setName("Samostalni igrači");
-			clubService.saveClub(independentClub);
-		}
-
-	}
-
-	@Override
-	public void saveClubWithData(HtmlDivision clubElement, int orderNumber) {
-		try {
-			HtmlAnchor clubLink = clubElement.getFirstByXPath(".//a");
-			HtmlImage clubImage = clubElement.getFirstByXPath(".//img");
-			HtmlHeading4 clubNameElement = clubElement.getFirstByXPath(".//h4[contains(@class, 'nomargin')]");
-			HtmlParagraph clubInfo = clubElement.getFirstByXPath(".//p");
-
-			if (clubLink != null && clubNameElement != null) {
-//		            String externalId = extractClubIdFromLink(clubLink.getAttribute("href"));
-				String name = clubNameElement.getTextContent().trim();
-				String externalLink = "https://bilijar.club/" + clubLink.getAttribute("href");
-				String[] parts = externalLink.split("ID=");
-				String externalId = parts.length > 1 ? parts[1] : "";
-
-				HtmlImage countryFlagImage = clubInfo.getFirstByXPath(".//img[contains(@src, 'images/flags/')]");
-
-				String countryFlagURL = "";
-
-				if (countryFlagImage != null) {
-					countryFlagURL = countryFlagImage.getAttribute("src");
-				}
-
-				String imageURL = "";
-				String clubInfoText = clubInfo.getTextContent();
-
-				if (clubImage != null) {
-					imageURL = clubImage.getAttribute("src");
-				}
-
-				// Provera da li klub već postoji u bazi podataka
-				Optional<Club> existingClubOptional = clubRepo.findByExternalId(externalId);
-				if (existingClubOptional.isPresent()) {
-					// Ažuriranje postojećeg kluba ako postoji
-					Club existingClub = existingClubOptional.get();
-					existingClub.setName(name);
-					existingClub.setClubInfo(clubInfoText);
-					existingClub.setCountryFlagURL(countryFlagURL);
-					existingClub.setExternalLink(externalLink);
-					existingClub.setImageURL(imageURL);
-					clubService.saveClub(existingClub); // Koristimo servis za čuvanje kluba
-				} else {
-					// Kreiranje novog kluba ako ne postoji
-					Club newClub = new Club();
-					newClub.setExternalId(externalId);
-					newClub.setName(name);
-					newClub.setClubInfo(clubInfoText);
-					newClub.setCountryFlagURL(countryFlagURL);
-					newClub.setExternalLink(externalLink);
-					newClub.setImageURL(imageURL);
-					clubService.saveClub(newClub); // Koristimo servis za čuvanje kluba
-				}
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-	}
-
-	@Override
-	public void saveTournamentWithData(Element tournamentElement, Club club, String year) {
-		// Izdvojimo sve potrebne informacije iz HTML-a
-		String externalLinkWithoutBaseURL = tournamentElement.select("h4 a").attr("href");
-		String externalId = externalLinkWithoutBaseURL.substring(externalLinkWithoutBaseURL.lastIndexOf("=") + 1);
-		String name = tournamentElement.select("h4 a").text();
-
-		String dateText = tournamentElement.select("td span").first().text(); // Dobijamo tekst datuma u formatu "dan.mesec"
-		LocalDate tournamentDate = parseTournamentDate(dateText, year);
-
-		String externalLink = "https://bilijar.club/" + externalLinkWithoutBaseURL;
-
-		// Proverimo da li turnir već postoji u bazi na osnovu externalId-a
-		Optional<Tournament> existingTournamentOptional = tournamentRepo.findByExternalId(externalId);
-
-		if (existingTournamentOptional.isPresent()) {
-			// Ako turnir već postoji, ažuriramo njegove informacije
-			Tournament existingTournament = existingTournamentOptional.get();
-
-			existingTournament.setExternalLink(externalLink);
-			existingTournament.setName(name);
-			existingTournament.setDate(tournamentDate);
-			existingTournament.setClub(club);
-			tournamentService.saveTournament(existingTournament);
-		} else {
-			// Ako turnir ne postoji, kreiramo novi
-			Tournament newTournament = new Tournament();
-			newTournament.setExternalId(externalId);
-			newTournament.setExternalLink(externalLink);
-			newTournament.setName(name);
-			newTournament.setDate(tournamentDate);
-			newTournament.setClub(club);
-			tournamentService.saveTournament(newTournament);
-		}
-
-	}
-
-	private LocalDate parseTournamentDate(String dateText, String year) {
-		DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MMM.yyyy", Locale.ENGLISH);
-		String fullDateText = dateText + "." + year; // Dodajemo godinu da bismo dobili puni datum
-		return LocalDate.parse(fullDateText, formatter);
-	}
-
+	/**
+	 * Synchronizes all tournaments from the website for all clubs and years.
+	 * Scrapes tournament data and delegates to TournamentService for processing.
+	 */
 	@Override
 	public void syncAllTournamentsFromWebsite() {
+		log.info("=== Starting tournament synchronization for all years ===");
 		long startTime = System.currentTimeMillis();
+		int totalTournamentsProcessed = 0;
+
 		List<Club> clubs = clubRepo.findAll();
+		log.info("Processing tournaments for {} clubs", clubs.size());
 
 		for (Club club : clubs) {
 			if (club.getExternalId().equals(INDEPENDEND_CLUB_EXTERNAL_ID)) {
+				log.debug("Skipping independent club");
 				continue;
 			}
-			for (String year : TOURNAMENT_YEARS) {
 
+			log.info("Processing tournaments for club: {} (ID: {})", club.getName(), club.getExternalId());
+			int clubTournamentCount = 0;
+
+			for (String year : TOURNAMENT_YEARS) {
+				log.debug("  Fetching tournaments for year: {}", year);
 				boolean endOfYear = false;
 				int pagiantionCount = 0;
 
@@ -390,182 +206,337 @@ public class ScraperServiceImpl implements ScraperService {
 
 					if (result != null && !result.isEmpty()) {
 						Document doc = Jsoup.parse("<table>" + result + "</table>");
-						Elements tournaments = doc.select("tr"); // selektujemo sve elemente <tr>
+						Elements tournaments = doc.select("tr");
 
 						for (Element tournament : tournaments) {
-							saveTournamentWithData(tournament, club, year);
+							tournamentService.saveTournamentWithData(tournament, club, year);
+							totalTournamentsProcessed++;
+							clubTournamentCount++;
 						}
+
+						log.debug("    Processed {} tournaments from pagination offset {}", tournaments.size(), pagiantionCount);
 						pagiantionCount = pagiantionCount + 10;
 					} else {
 						endOfYear = true;
 					}
 				}
 			}
+			log.info("  Completed club: {} - processed {} tournaments", club.getName(), clubTournamentCount);
 		}
+
 		long endTime = System.currentTimeMillis();
 		long executionTime = endTime - startTime;
-		double executionTimeInMinutes = executionTime / 60000.0;
-		System.out.println("syncAllTournamentsFromWebsite: " + executionTimeInMinutes + " min .");
+		double executionTimeInSeconds = executionTime / 1000.0;
+		log.info("=== Tournament synchronization completed ===");
+		log.info("Total tournaments processed: {}", totalTournamentsProcessed);
+		log.info("Execution time: {} seconds ({} minutes)",
+			String.format("%.2f", executionTimeInSeconds),
+			String.format("%.2f", executionTimeInSeconds / 60.0));
 	}
 
-	@Override
-	public void saveMatchWithData(HtmlTableRow matchElement, int orderNumber, Tournament tournament) {
-		Match newMatch = new Match();
-
-		if (matchElement.getCells().get(4).getTextContent().trim().equals(">>")) {
-			return;
-		}
-
-		newMatch.setTournament(tournament);
-
-		try {
-			newMatch.setOrderNumber(Integer.parseInt(matchElement.getCells().get(0).getTextContent().trim()));
-			newMatch.setDate(getMatchDateTimeFromCell(matchElement.getCells().get(1).getTextContent().trim(), tournament.getDate().getYear()));
-
-			Player player1;
-			Player player2;
-			Team team1;
-			Team team2;
-			if (tournament.getSingle()) {
-				player1 = getPlayerByName(matchElement.getCells().get(3).getTextContent().trim());
-				player2 = getPlayerByName(matchElement.getCells().get(7).getTextContent().trim());
-				newMatch.setPlayer1(player1);
-				newMatch.setPlayer2(player2);
-			} else {
-				team1 = getTeamByName(matchElement.getCells().get(3).getTextContent().trim());
-				team2 = getTeamByName(matchElement.getCells().get(7).getTextContent().trim());
-
-				String teamname1 = matchElement.getCells().get(7).getVisibleText();
-				String teamname2 = matchElement.getCells().get(7).getTextContent();
-			}
-
-			try {
-				newMatch.setResult1(Integer.parseInt((matchElement.getCells().get(4).getTextContent().trim())));
-			} catch (NumberFormatException e) {
-				newMatch.setResult1(-1);
-			}
-
-			try {
-				newMatch.setResult2(Integer.parseInt((matchElement.getCells().get(5).getTextContent().trim())));
-			} catch (NumberFormatException e) {
-				newMatch.setResult2(-1);
-			}
-
-			newMatch.setHandikap((matchElement.getCells().get(6).getTextContent().trim()));
-
-//			if (newMatch.getResult1() > newMatch.getResult2()) {
-//				newMatch.setWinner(player1);
-//			} else {
-//				newMatch.setWinner(player2);
-//			}
-
-		} catch (NumberFormatException e) {
-			e.printStackTrace();
-		} catch (IndexOutOfBoundsException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-
-		matchService.saveMatch(newMatch);
-
-	}
-
-	private Team getTeamByName(String playerNames) {
-		Team team = new Team();
-		team.setPlayer1(getFirstPlayerFromTeamName(playerNames));
-		team.setPlayer2(getSecondPlayerFromTeamName(playerNames));
-		return teamRepo.save(team);
-	}
-
-	private Player getSecondPlayerFromTeamName(String playerNames) {
-		// TODO Auto-generated method stub
-		return null;
-	}
-
-	private Player getFirstPlayerFromTeamName(String playerNames) {
-		// TODO Auto-generated method stub
-		return null;
-	}
-
-	private Player getPlayerByName(String fullName) {
-		Optional<Player> playerOptional = playerRepo.findByFullName(fullName.trim());
-		if (playerOptional.isPresent()) {
-			return playerOptional.get();
-		}
-
-		System.out.println("Nije pronadjen igrac: " + fullName);
-		return null;
-	}
-
-	public LocalDateTime getMatchDateTimeFromCell(String cellContent, int tournamentYear) {
-		// Formatiranje godine turnira prema uzorku "yyyy"
-		String formattedYear = String.valueOf(tournamentYear);
-
-		// Formatiranje datuma i vremena prema uzorku "dd.MM. HH:mm"
-		DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
-
-		// Podjela sadržaja ćelije po crticama ("-")
-		String[] parts = cellContent.split(" - ");
-
-		// Dobijanje datuma i vremena iz podijeljenih dijelova
-		String datePart = parts[0]; // "10.12."
-		String timePart = parts[1]; // "11:21"
-
-		// Spajanje datuma i vremena sa godinom turnira
-		String cellContentWithYear = datePart + formattedYear + " " + timePart;
-
-		// Parsiranje teksta u LocalDateTime
-		LocalDateTime dateTime = LocalDateTime.parse(cellContentWithYear, formatter);
-
-		return dateTime;
-	}
-
+	/**
+	 * Synchronizes all matches from the website for all tournaments.
+	 * Scrapes match data and delegates to MatchService for processing.
+	 */
 	@Override
 	public void syncAllMatchesFromWebsite() {
+		log.info("=== Starting match synchronization for all tournaments ===");
 		long startTime = System.currentTimeMillis();
+		int totalMatchesProcessed = 0;
 
 		try {
 			WebClient webClient = new WebClient(BrowserVersion.CHROME);
-			webClient.getOptions().setJavaScriptEnabled(true); // enable javascript
-			webClient.getOptions().setThrowExceptionOnScriptError(false); // even if there is error in js continue
+			webClient.getOptions().setJavaScriptEnabled(true);
+			webClient.getOptions().setThrowExceptionOnScriptError(false);
 
 			List<Tournament> tournaments = tournamentRepo.findAll();
+			log.info("Found {} tournaments to process", tournaments.size());
 
+			int tournamentCounter = 0;
 			for (Tournament tournament : tournaments) {
+				tournamentCounter++;
+				log.info("[{}/{}] Processing tournament: {} (ID: {})",
+					tournamentCounter, tournaments.size(), tournament.getName(), tournament.getExternalId());
+
 				HtmlPage page = webClient.getPage("https://bilijar.club/tournament.php?ID=" + tournament.getExternalId());
 
-				updateTournamentData(tournament, page);
+				tournamentService.updateTournamentData(tournament, page);
 
 				List<HtmlTableRow> matches = page.getByXPath("//tr[contains(@class, 'size-11')]");
-				System.out.println(tournament.getName());
+				log.info("  Found {} matches for tournament: {}", matches.size(), tournament.getName());
+
 				int orderNumberMatch = 0;
 				for (HtmlTableRow matchElement : matches) {
 					orderNumberMatch++;
-					saveMatchWithData(matchElement, orderNumberMatch, tournament);
-				}
+					matchService.saveMatchWithData(matchElement, orderNumberMatch, tournament);
+					totalMatchesProcessed++;
 
+					if (orderNumberMatch % 20 == 0) {
+						log.debug("  Processed {}/{} matches", orderNumberMatch, matches.size());
+					}
+				}
+				log.info("  Completed tournament: {} - processed {} matches", tournament.getName(), matches.size());
 			}
 
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
+			log.error("Error during match synchronization", e);
 			e.printStackTrace();
 		}
+
 		long endTime = System.currentTimeMillis();
 		long executionTime = endTime - startTime;
 		double executionTimeInMinutes = executionTime / 60000.0;
-		System.out.println("syncAllMatchesFromWebsite: " + executionTimeInMinutes + " min .");
+		log.info("=== Match synchronization completed ===");
+		log.info("Total matches processed: {}", totalMatchesProcessed);
+		log.info("Execution time: {:.2f} minutes", executionTimeInMinutes);
 	}
 
-	private void updateTournamentData(Tournament tournament, HtmlPage page) {
-		HtmlTable tournamentTable = (HtmlTable) page.getElementById("turnir");
+	/**
+	 * Synchronizes tournaments for a specific year only.
+	 *
+	 * @param year the year to sync tournaments for
+	 */
+	@Override
+	public void syncTournamentsForYear(String year) {
+		log.info("=== Starting tournament synchronization for year: {} ===", year);
+		long startTime = System.currentTimeMillis();
+		int totalTournamentsProcessed = 0;
 
-		// Extract tournament details
-		String schema = tournamentTable.getCellAt(1, 1).getTextContent().trim();
-		String type = tournamentTable.getCellAt(1, 4).getTextContent().trim();
-		// Update tournament attributes
-		tournament.setSchema(schema);
-		tournament.setSingle(!type.equals("Parovi"));
+		List<Club> clubs = clubRepo.findAll();
+		log.info("Processing tournaments for {} clubs", clubs.size());
 
+		for (Club club : clubs) {
+			if (club.getExternalId().equals(INDEPENDEND_CLUB_EXTERNAL_ID)) {
+				continue;
+			}
+
+			log.info("Processing tournaments for club: {} (ID: {})", club.getName(), club.getExternalId());
+			int clubTournamentCount = 0;
+
+			boolean endOfYear = false;
+			int pagiantionCount = 0;
+
+			while (!endOfYear) {
+				MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+				body.add("getresult", String.valueOf(pagiantionCount));
+				body.add("club", club.getExternalId());
+				body.add("year", year);
+
+				String result = restTemplate.postForObject("https://bilijar.club/fetch.php", body, String.class);
+
+				if (result != null && !result.isEmpty()) {
+					Document doc = Jsoup.parse("<table>" + result + "</table>");
+					Elements tournaments = doc.select("tr");
+
+					for (Element tournament : tournaments) {
+						tournamentService.saveTournamentWithData(tournament, club, year);
+						totalTournamentsProcessed++;
+						clubTournamentCount++;
+					}
+
+					log.debug("  Processed {} tournaments from pagination offset {}", tournaments.size(), pagiantionCount);
+					pagiantionCount = pagiantionCount + 10;
+				} else {
+					endOfYear = true;
+				}
+			}
+			log.info("  Completed club: {} - processed {} tournaments", club.getName(), clubTournamentCount);
+		}
+
+		long endTime = System.currentTimeMillis();
+		long executionTime = endTime - startTime;
+		double executionTimeInMinutes = executionTime / 60000.0;
+		log.info("=== Tournament synchronization for year {} completed ===", year);
+		log.info("Total tournaments processed: {}", totalTournamentsProcessed);
+		log.info("Execution time: {:.2f} minutes", executionTimeInMinutes);
+	}
+
+	/**
+	 * Synchronizes only the most recent tournaments (current year).
+	 */
+	@Override
+	public void syncLatestTournaments() {
+		String currentYear = String.valueOf(java.time.Year.now().getValue());
+		log.info("=== Syncing latest tournaments for current year: {} ===", currentYear);
+		syncTournamentsForYear(currentYear);
+	}
+
+	/**
+	 * Synchronizes matches only for the most recent tournament.
+	 */
+	@Override
+	public void syncMatchesForLatestTournament() {
+		log.info("=== Starting match synchronization for latest tournament ===");
+		long startTime = System.currentTimeMillis();
+		Tournament latestTournament = null;
+
+		try {
+			WebClient webClient = new WebClient(BrowserVersion.CHROME);
+			webClient.getOptions().setJavaScriptEnabled(true);
+			webClient.getOptions().setThrowExceptionOnScriptError(false);
+
+			latestTournament = tournamentRepo.findTopByOrderByDateDesc();
+
+			if (latestTournament == null) {
+				log.warn("No tournaments found in database");
+				return;
+			}
+
+			log.info("Processing latest tournament: {} (Date: {}, ID: {})",
+				latestTournament.getName(), latestTournament.getDate(), latestTournament.getExternalId());
+
+			HtmlPage page = webClient.getPage("https://bilijar.club/tournament.php?ID=" + latestTournament.getExternalId());
+
+			tournamentService.updateTournamentData(latestTournament, page);
+
+			List<HtmlTableRow> matches = page.getByXPath("//tr[contains(@class, 'size-11')]");
+			log.info("Found {} matches for tournament: {}", matches.size(), latestTournament.getName());
+
+			int orderNumberMatch = 0;
+			for (HtmlTableRow matchElement : matches) {
+				orderNumberMatch++;
+				matchService.saveMatchWithData(matchElement, orderNumberMatch, latestTournament);
+
+				if (orderNumberMatch % 10 == 0) {
+					log.debug("Processed {}/{} matches", orderNumberMatch, matches.size());
+				}
+			}
+			log.info("Completed processing {} matches", matches.size());
+
+		} catch (IOException e) {
+			log.error("Error during match synchronization for latest tournament", e);
+			e.printStackTrace();
+		}
+
+		long endTime = System.currentTimeMillis();
+		long executionTime = endTime - startTime;
+		double executionTimeInSeconds = executionTime / 1000.0;
+		log.info("=== Match synchronization for latest tournament completed ===");
+		log.info("Execution time: {} seconds ({} minutes)",
+			String.format("%.2f", executionTimeInSeconds),
+			String.format("%.2f", executionTimeInSeconds / 60.0));
+
+		if (latestTournament != null) {
+			log.info("Now syncing player tournament stats...");
+			syncPlayerStatsForTournament(latestTournament.getExternalId());
+		}
+	}
+
+	/**
+	 * Synchronizes matches for a specific tournament by external ID.
+	 *
+	 * @param tournamentExternalId the external ID of the tournament
+	 */
+	@Override
+	public void syncMatchesForTournament(String tournamentExternalId) {
+		log.info("=== Starting match synchronization for tournament with external ID: {} ===", tournamentExternalId);
+		long startTime = System.currentTimeMillis();
+		int totalMatchesProcessed = 0;
+
+		try {
+			WebClient webClient = new WebClient(BrowserVersion.CHROME);
+			webClient.getOptions().setJavaScriptEnabled(true);
+			webClient.getOptions().setThrowExceptionOnScriptError(false);
+
+			Tournament tournament = tournamentRepo.findByExternalId(tournamentExternalId)
+				.orElse(null);
+
+			if (tournament == null) {
+				log.warn("Tournament with external ID '{}' not found in database", tournamentExternalId);
+				return;
+			}
+
+			log.info("Processing tournament: {} (Date: {}, ID: {})",
+				tournament.getName(), tournament.getDate(), tournament.getExternalId());
+
+			HtmlPage page = webClient.getPage("https://bilijar.club/tournament.php?ID=" + tournament.getExternalId());
+
+			tournamentService.updateTournamentData(tournament, page);
+
+			List<HtmlTableRow> matches = page.getByXPath("//tr[contains(@class, 'size-11')]");
+			log.info("Found {} matches for tournament: {}", matches.size(), tournament.getName());
+
+			int orderNumberMatch = 0;
+			for (HtmlTableRow matchElement : matches) {
+				orderNumberMatch++;
+				matchService.saveMatchWithData(matchElement, orderNumberMatch, tournament);
+				totalMatchesProcessed++;
+
+				if (orderNumberMatch % 10 == 0) {
+					log.debug("Processed {}/{} matches", orderNumberMatch, matches.size());
+				}
+			}
+			log.info("Completed processing {} matches for tournament: {}", matches.size(), tournament.getName());
+
+		} catch (IOException e) {
+			log.error("Error during match synchronization for tournament: {}", tournamentExternalId, e);
+			e.printStackTrace();
+		}
+
+		long endTime = System.currentTimeMillis();
+		long executionTime = endTime - startTime;
+		double executionTimeInSeconds = executionTime / 1000.0;
+		log.info("=== Match synchronization for tournament completed ===");
+		log.info("Total matches processed: {}", totalMatchesProcessed);
+		log.info("Execution time: {} seconds ({} minutes)",
+			String.format("%.2f", executionTimeInSeconds),
+			String.format("%.2f", executionTimeInSeconds / 60.0));
+
+		log.info("Now syncing player tournament stats...");
+		syncPlayerStatsForTournament(tournamentExternalId);
+	}
+
+	@Override
+	public void syncPlayerStatsForTournament(String tournamentExternalId) {
+		log.info("=== Starting player stats synchronization for tournament: {} ===", tournamentExternalId);
+		long startTime = System.currentTimeMillis();
+		int totalStatsProcessed = 0;
+
+		try {
+			WebClient webClient = new WebClient(BrowserVersion.CHROME);
+			webClient.getOptions().setJavaScriptEnabled(true);
+			webClient.getOptions().setThrowExceptionOnScriptError(false);
+
+			Tournament tournament = tournamentRepo.findByExternalId(tournamentExternalId)
+				.orElse(null);
+
+			if (tournament == null) {
+				log.warn("Tournament with external ID '{}' not found in database", tournamentExternalId);
+				return;
+			}
+
+			log.info("Processing player stats for tournament: {} (Date: {}, ID: {})",
+				tournament.getName(), tournament.getDate(), tournament.getExternalId());
+
+			HtmlPage page = webClient.getPage("https://bilijar.club/tournament.php?ID=" + tournament.getExternalId());
+
+			List<HtmlTableRow> statsRows = page.getByXPath("//table[@id='results2']/tbody/tr[position()>1]");
+			log.info("Found {} player stats rows", statsRows.size());
+
+			for (HtmlTableRow row : statsRows) {
+				playerTournamentStatsService.saveStatsFromTableRow(row, tournament);
+				totalStatsProcessed++;
+
+				if (totalStatsProcessed % 5 == 0) {
+					log.debug("Processed {}/{} player stats", totalStatsProcessed, statsRows.size());
+				}
+			}
+
+			log.info("Completed processing {} player stats", totalStatsProcessed);
+
+		} catch (IOException e) {
+			log.error("Error during player stats synchronization for tournament: {}", tournamentExternalId, e);
+			e.printStackTrace();
+		}
+
+		long endTime = System.currentTimeMillis();
+		long executionTime = endTime - startTime;
+		double executionTimeInSeconds = executionTime / 1000.0;
+		log.info("=== Player stats synchronization completed ===");
+		log.info("Total stats processed: {}", totalStatsProcessed);
+		log.info("Execution time: {} seconds ({} minutes)",
+			String.format("%.2f", executionTimeInSeconds),
+			String.format("%.2f", executionTimeInSeconds / 60.0));
 	}
 
 }

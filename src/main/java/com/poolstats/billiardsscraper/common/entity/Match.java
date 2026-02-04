@@ -60,6 +60,10 @@ public class Match {
 
 	private String videoLink;
 
+	private Double rating1;
+
+	private Double rating2;
+
 	@ManyToOne
 	@JoinColumn(name = "tournament_id")
 	private Tournament tournament;
