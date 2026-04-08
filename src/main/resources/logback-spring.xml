@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- Console appender -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %5level %relative --- [%thread] %-40.40logger{39} : %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Sync errors file appender -->
+    <appender name="SYNC_ERRORS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/sync-errors.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/sync-errors.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level : %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- HtmlUnit JS errors file appender -->
+    <appender name="HTMLUNIT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/htmlunit-errors.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/htmlunit-errors.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level : %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Suppress HtmlUnit JS noise from console, write to file only -->
+    <logger name="org.htmlunit.javascript.DefaultJavaScriptErrorListener" level="ERROR" additivity="false">
+        <appender-ref ref="HTMLUNIT_FILE"/>
+    </logger>
+    <logger name="org.htmlunit" level="WARN" additivity="false">
+        <appender-ref ref="HTMLUNIT_FILE"/>
+    </logger>
+
+    <!-- Sync business errors — console + dedicated file -->
+    <logger name="SYNC_ERRORS" level="WARN" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="SYNC_ERRORS_FILE"/>
+    </logger>
+
+    <!-- Application root -->
+    <logger name="com.poolstats" level="INFO"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>
+

@@ -13,6 +13,8 @@ import javax.persistence.ManyToOne;
 import javax.persistence.OneToMany;
 import javax.persistence.Table;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -46,6 +48,7 @@ public class Tournament {
 	@JoinColumn(name = "club_id")
 	private Club club;
 
+	@JsonIgnore
 	@OneToMany(mappedBy = "tournament")
 	private List<Match> matches;
 

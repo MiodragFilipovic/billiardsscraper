@@ -23,4 +23,10 @@ public interface ScraperService {
 
 	void syncPlayerStatsForTournament(String tournamentExternalId);
 
+	void syncMatchesForAllDbTournaments();
+
+	String syncWinsLossesForPlayer(Long playerId);
+
+	String syncWinsLossesForAllPlayers();
+
 }

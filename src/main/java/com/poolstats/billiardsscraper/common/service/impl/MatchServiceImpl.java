@@ -98,6 +98,8 @@ public class MatchServiceImpl implements MatchService {
 
 			extractRatingChange(matchElement, newMatch);
 
+			determineWinner(newMatch);
+
 		} catch (NumberFormatException e) {
 			e.printStackTrace();
 		} catch (IndexOutOfBoundsException e) {
@@ -105,6 +107,43 @@ public class MatchServiceImpl implements MatchService {
 		}
 
 		saveMatch(newMatch);
+	}
+
+	/**
+	 * Determines and sets the match winner based on result scores.
+	 * result = -1 means forfeit (FF) so the other player wins.
+	 * Only applicable for singles matches (player1 and player2 must be set).
+	 *
+	 * @param match the match entity to update with winner
+	 */
+	private void determineWinner(Match match) {
+		if (match.getPlayer1() == null || match.getPlayer2() == null) {
+			return;
+		}
+
+		Integer r1 = match.getResult1();
+		Integer r2 = match.getResult2();
+
+		if (r1 == null || r2 == null) {
+			return;
+		}
+
+		// FF (forfeit) is stored as -1
+		if (r1 == -1 && r2 >= 0) {
+			match.setWinner(match.getPlayer2());
+			log.debug("Match winner (FF): player2={}", match.getPlayer2().getFullName());
+		} else if (r2 == -1 && r1 >= 0) {
+			match.setWinner(match.getPlayer1());
+			log.debug("Match winner (FF): player1={}", match.getPlayer1().getFullName());
+		} else if (r1 > r2) {
+			match.setWinner(match.getPlayer1());
+			log.debug("Match winner: player1={} ({} : {})", match.getPlayer1().getFullName(), r1, r2);
+		} else if (r2 > r1) {
+			match.setWinner(match.getPlayer2());
+			log.debug("Match winner: player2={} ({} : {})", match.getPlayer2().getFullName(), r1, r2);
+		} else {
+			log.debug("Match is a draw or undetermined ({} : {}), no winner set", r1, r2);
+		}
 	}
 
 	/**

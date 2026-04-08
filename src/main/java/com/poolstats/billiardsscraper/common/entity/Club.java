@@ -10,6 +10,8 @@ import javax.persistence.Id;
 import javax.persistence.OneToMany;
 import javax.persistence.Table;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -43,9 +45,11 @@ public class Club {
 
 	private String imageURL;
 
+	@JsonIgnore
 	@OneToMany(mappedBy = "club")
 	private List<Player> players;
 
+	@JsonIgnore
 	@OneToMany(mappedBy = "club")
 	private List<Tournament> tournaments;
 }

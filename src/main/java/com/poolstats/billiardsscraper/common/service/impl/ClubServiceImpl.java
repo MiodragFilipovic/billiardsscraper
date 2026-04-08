@@ -1,12 +1,15 @@
 package com.poolstats.billiardsscraper.common.service.impl;
 
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.htmlunit.html.HtmlAnchor;
 import org.htmlunit.html.HtmlDivision;
 import org.htmlunit.html.HtmlHeading4;
 import org.htmlunit.html.HtmlImage;
 import org.htmlunit.html.HtmlParagraph;
+import org.htmlunit.html.HtmlSpan;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +24,8 @@ import com.poolstats.billiardsscraper.common.service.ClubService;
 public class ClubServiceImpl implements ClubService {
 
 	public static final String INDEPENDEND_CLUB_EXTERNAL_ID = "0";
+
+	private static final Pattern NUMBER_PATTERN = Pattern.compile("(\\d+)");
 
 	@Autowired
 	private ClubRepo clubRepo;
@@ -66,6 +71,22 @@ public class ClubServiceImpl implements ClubService {
 					imageURL = clubImage.getAttribute("src");
 				}
 
+				// Parse player count from btn-warning span: "339 Igraca"
+				Integer playersCount = null;
+				HtmlSpan playersSpan = clubElement.getFirstByXPath(".//a[contains(@class,'btn-warning')]//span");
+				if (playersSpan != null) {
+					Matcher m = NUMBER_PATTERN.matcher(playersSpan.getTextContent());
+					if (m.find()) playersCount = Integer.parseInt(m.group(1));
+				}
+
+				// Parse tournament count from btn-primary span: "1270 turnira"
+				Integer tournamentsCount = null;
+				HtmlSpan tournamentsSpan = clubElement.getFirstByXPath(".//a[contains(@class,'btn-primary')]//span");
+				if (tournamentsSpan != null) {
+					Matcher m = NUMBER_PATTERN.matcher(tournamentsSpan.getTextContent());
+					if (m.find()) tournamentsCount = Integer.parseInt(m.group(1));
+				}
+
 				Optional<Club> existingClubOptional = clubRepo.findByExternalId(externalId);
 				if (existingClubOptional.isPresent()) {
 					Club existingClub = existingClubOptional.get();
@@ -74,6 +95,8 @@ public class ClubServiceImpl implements ClubService {
 					existingClub.setCountryFlagURL(countryFlagURL);
 					existingClub.setExternalLink(externalLink);
 					existingClub.setImageURL(imageURL);
+					existingClub.setPlaуersCount(playersCount);
+					existingClub.setTournamentsCount(tournamentsCount);
 					saveClub(existingClub);
 				} else {
 					Club newClub = new Club();
@@ -83,6 +106,8 @@ public class ClubServiceImpl implements ClubService {
 					newClub.setCountryFlagURL(countryFlagURL);
 					newClub.setExternalLink(externalLink);
 					newClub.setImageURL(imageURL);
+					newClub.setPlaуersCount(playersCount);
+					newClub.setTournamentsCount(tournamentsCount);
 					saveClub(newClub);
 				}
 			}
